@@ -153,14 +153,15 @@ public struct SMTP {
                 authMethods: authMethods,
                 domainName: domainName,
                 timeout: timeout,
-                logger: logger  // Pass the logger here
+                logger: logger
             )
             let mailSender = MailSender(
                 socket: socket,
                 mailsToSend: mails,
                 progress: progress,
                 completion: completion,
-                logger: logger)
+                logger: logger
+            )
             mailSender.send()
         } catch {
             completion?([], mails.map { ($0, error) })
