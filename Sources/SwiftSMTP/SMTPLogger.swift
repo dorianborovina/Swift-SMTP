@@ -34,9 +34,14 @@ public class SMTPLogger {
         log("(TLS negotiation details)")
     }
     
-    private func log(_ message: String) {
+    public func log(_ message: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         let logEntry = "[\(timestamp)] \(message)"
         transactionLog.append(logEntry)
+    }
+    
+    public func logError(_ error: Error, context: String) {
+        let errorMessage = "Error in \(context): \(error.localizedDescription)"
+        log(errorMessage)
     }
 }

@@ -33,15 +33,20 @@ struct DataSender {
 
     // Send the text and attachments of the `mail`
     func send(_ mail: Mail) throws {
-        try sendHeaders(mail.headersString)
-        logger.logSent("(email headers)")
+        do {
+            try sendHeaders(mail.headersString)
+            logger.logSent("(email headers)")
 
-        if mail.hasAttachment {
-            try sendMixed(mail)
-        } else {
-            try sendText(mail.text)
+            if mail.hasAttachment {
+                try sendMixed(mail)
+            } else {
+                try sendText(mail.text)
+            }
+            logger.logSent("(email content)")
+        } catch {
+            logger.logError(error, context: "Sending mail data")
+            throw error
         }
-        logger.logSent("(email content)")
     }
 }
 

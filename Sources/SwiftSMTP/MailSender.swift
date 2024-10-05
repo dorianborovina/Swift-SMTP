@@ -51,29 +51,36 @@ class MailSender {
     }
 
     func send() {
+        logger.log("Starting to send emails")
         DispatchQueue.global().async {
             self.sendNext()
         }
     }
-}
 
-private extension MailSender {
-    func sendNext() {
+    private func sendNext() {
         if mailsToSend.isEmpty {
+            logger.log("All emails processed")
             completion?(sent, failed)
             progress = nil
             completion = nil
-            try? quit()
+            do {
+                try quit()
+            } catch {
+                logger.logError(error, context: "Quitting SMTP session")
+            }
             return
         }
         let mail = mailsToSend.removeFirst()
         do {
+            logger.log("Attempting to send email: \(mail.subject)")
             try send(mail)
             if completion != nil {
                 sent.append(mail)
             }
             progress?(mail, nil)
+            logger.log("Email sent successfully: \(mail.subject)")
         } catch {
+            logger.logError(error, context: "Sending mail: \(mail.subject)")
             if completion != nil {
                 failed.append((mail, error))
             }
@@ -84,12 +91,14 @@ private extension MailSender {
         }
     }
 
-    func quit() throws {
+    private func quit() throws {
+        logger.log("Initiating SMTP quit sequence")
         try socket.send(.quit)
         socket.close()
+        logger.log("SMTP session closed")
     }
 
-    func send(_ mail: Mail) throws {
+    private func send(_ mail: Mail) throws {
         let recipientEmails = try getRecipientEmails(from: mail)
         try validateEmails(recipientEmails)
         try sendMail(mail.from.email)
@@ -99,39 +108,51 @@ private extension MailSender {
         try dataEnd()
     }
 
-    func getRecipientEmails(from mail: Mail) throws -> [String] {
+    private func getRecipientEmails(from mail: Mail) throws -> [String] {
         var recipientEmails = mail.to.map { $0.email }
         recipientEmails += mail.cc.map { $0.email }
         recipientEmails += mail.bcc.map { $0.email }
 
         guard !recipientEmails.isEmpty else {
+            logger.logError(SMTPError.noRecipients, context: "Getting recipient emails")
             throw SMTPError.noRecipients
         }
 
         return recipientEmails
     }
 
-    func validateEmails(_ emails: [String]) throws {
-        for email in emails where try !email.isValidEmail() {
-            throw SMTPError.invalidEmail(email: email)
+    private func validateEmails(_ emails: [String]) throws {
+        for email in emails {
+            do {
+                if try !email.isValidEmail() {
+                    throw SMTPError.invalidEmail(email: email)
+                }
+            } catch {
+                logger.logError(error, context: "Validating email: \(email)")
+                throw error
+            }
         }
     }
 
-    func sendMail(_ from: String) throws {
+    private func sendMail(_ from: String) throws {
+        logger.log("Sending MAIL FROM command: \(from)")
         try socket.send(.mail(from))
     }
 
-    func sendTo(_ emails: [String]) throws {
+    private func sendTo(_ emails: [String]) throws {
         for email in emails {
+            logger.log("Sending RCPT TO command: \(email)")
             try socket.send(.rcpt(email))
         }
     }
 
-    func data() throws {
+    private func data() throws {
+        logger.log("Sending DATA command")
         try socket.send(.data)
     }
 
-    func dataEnd() throws {
+    private func dataEnd() throws {
+        logger.log("Sending end of data")
         try socket.send(.dataEnd)
     }
 
