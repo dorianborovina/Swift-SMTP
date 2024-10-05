@@ -18,15 +18,9 @@ import Foundation
 import Socket
 import LoggerAPI
 
-protocol SMTPSocketDelegate: AnyObject {
-    func smtpSocket(_ socket: SMTPSocket, didSend command: String)
-    func smtpSocket(_ socket: SMTPSocket, didReceive response: String)
-}
-
 struct SMTPSocket {
     private let socket: Socket
     let logger: SMTPLogger
-    weak var delegate: SMTPSocketDelegate?
     
     init(hostname: String,
          email: String,
@@ -40,7 +34,9 @@ struct SMTPSocket {
          logger: SMTPLogger) throws {
         self.logger = logger
         socket = try Socket.create()
+        logger.logConnection(to: hostname)
         if tlsMode == .requireTLS {
+            logger.logTLSNegotiation()
             if let tlsConfiguration = tlsConfiguration {
                 socket.delegate = try tlsConfiguration.makeSSLService()
             } else {
@@ -52,6 +48,7 @@ struct SMTPSocket {
         var serverOptions = try getServerOptions(domainName: domainName)
         if tlsMode == .requireSTARTTLS || tlsMode == .normal {
             if try doStarttls(serverOptions: serverOptions, tlsConfiguration: tlsConfiguration) {
+                logger.logTLSNegotiation()
                 serverOptions = try getServerOptions(domainName: domainName)
             } else if tlsMode == .requireSTARTTLS {
                 throw SMTPError.requiredSTARTTLS
@@ -76,16 +73,16 @@ struct SMTPSocket {
     @discardableResult
     func send(_ command: Command) throws -> [Response] {
         try write(command.text)
-        delegate?.smtpSocket(self, didSend: command.text)
         let responses = try parseResponses(readFromSocket(), command: command)
         for response in responses {
-            delegate?.smtpSocket(self, didReceive: response.response)
+            logger.logReceived(response.response)
         }
         return responses
     }
 
     func close() {
         socket.close()
+        logger.logDisconnection()
     }
 }
 

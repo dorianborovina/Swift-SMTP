@@ -27,7 +27,7 @@ public typealias Progress = ((Mail, Error?) -> Void)?
 ///  sent `Mail`s. [(`Mail`, `Error`)] is an array of failed `Mail`s and their corresponding `Error`s.
 public typealias Completion = (([Mail], [(Mail, Error)]) -> Void)?
 
-class MailSender: SMTPSocketDelegate {
+class MailSender {
     private var socket: SMTPSocket
     private var mailsToSend: [Mail]
     private var progress: Progress
@@ -47,22 +47,13 @@ class MailSender: SMTPSocketDelegate {
         self.progress = progress
         self.completion = completion
         self.logger = logger
-        dataSender = DataSender(socket: socket)
-        self.socket.delegate = self
+        self.dataSender = DataSender(socket: socket, logger: logger)
     }
 
     func send() {
         DispatchQueue.global().async {
             self.sendNext()
         }
-    }
-    
-    func smtpSocket(_ socket: SMTPSocket, didSend command: String) {
-        logger.logSent(command)
-    }
-
-    func smtpSocket(_ socket: SMTPSocket, didReceive response: String) {
-        logger.logReceived(response)
     }
 }
 
@@ -142,6 +133,65 @@ private extension MailSender {
 
     func dataEnd() throws {
         try socket.send(.dataEnd)
+    }
+
+    func login(authMethod: AuthMethod, email: String, password: String) throws {
+        switch authMethod {
+        case .cramMD5:
+            try loginCramMD5(email: email, password: password)
+        case .login:
+            try loginLogin(email: email, password: password)
+        case .plain:
+            try loginPlain(email: email, password: password)
+        case .xoauth2:
+            try loginXOAuth2(email: email, accessToken: password)
+        }
+    }
+
+    func loginCramMD5(email: String, password: String) throws {
+        let challenge = try auth(authMethod: .cramMD5, credentials: nil).message
+        logger.logReceived("334 \(challenge)")
+        let response = try AuthEncoder.cramMD5(challenge: challenge, user: email, password: password)
+        try authPassword(response)
+        logger.logSent("(CRAM-MD5 response)")
+    }
+
+    func loginLogin(email: String, password: String) throws {
+        try auth(authMethod: .login, credentials: nil)
+        let credentials = AuthEncoder.login(user: email, password: password)
+        try authUser(credentials.encodedUser)
+        logger.logSent("(base64-encoded username)")
+        try authPassword(credentials.encodedPassword)
+        logger.logSent("(base64-encoded password)")
+    }
+
+    func loginPlain(email: String, password: String) throws {
+        let credentials = AuthEncoder.plain(user: email, password: password)
+        try auth(authMethod: .plain, credentials: credentials)
+        logger.logSent("(base64-encoded credentials)")
+    }
+
+    func loginXOAuth2(email: String, accessToken: String) throws {
+        let credentials = AuthEncoder.xoauth2(user: email, accessToken: accessToken)
+        try auth(authMethod: .xoauth2, credentials: credentials)
+        logger.logSent("(XOAUTH2 token)")
+    }
+
+    @discardableResult
+    func auth(authMethod: AuthMethod, credentials: String?) throws -> Response {
+        let responses = try socket.send(.auth(authMethod, credentials))
+        guard let response = responses.first else {
+            throw SMTPError.badResponse(command: "AUTH", response: responses.description)
+        }
+        return response
+    }
+
+    func authUser(_ user: String) throws {
+        try socket.send(.authUser(user))
+    }
+
+    func authPassword(_ password: String) throws {
+        try socket.send(.authPassword(password))
     }
 }
 

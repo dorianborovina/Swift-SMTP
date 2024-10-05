@@ -23,21 +23,25 @@ import Foundation
 struct DataSender {
     // Socket we use to read and write data to
     private let socket: SMTPSocket
+    private let logger: SMTPLogger
 
     // Init a new instance of `DataSender`
-    init(socket: SMTPSocket) {
+    init(socket: SMTPSocket, logger: SMTPLogger) {
         self.socket = socket
+        self.logger = logger  // This line was correct, the error message was misleading
     }
 
     // Send the text and attachments of the `mail`
     func send(_ mail: Mail) throws {
         try sendHeaders(mail.headersString)
+        logger.logSent("(email headers)")
 
         if mail.hasAttachment {
             try sendMixed(mail)
         } else {
             try sendText(mail.text)
         }
+        logger.logSent("(email content)")
     }
 }
 
@@ -199,13 +203,13 @@ extension DataSender {
 
 private extension DataSender {
     // Write `text` to the socket.
-    private func send(_ text: String) throws {
-        print("SEND: \(text)")
+    func send(_ text: String) throws {
+        logger.logSent(text)
         try socket.write(text)
     }
 
-    private func send(_ data: Data) throws {
-        print("SEND: data \(data.count) bytes")
+    func send(_ data: Data) throws {
+        logger.logSent("(sending data: \(data.count) bytes)")
         try socket.write(data)
     }
 }
