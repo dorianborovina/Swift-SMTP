@@ -27,22 +27,24 @@ public struct SMTP {
     private let authMethods: [String: AuthMethod]
     private let domainName: String
     private let timeout: UInt
-
+    private var transactionLog: [String] = []
+    public let logger = SMTPLogger()
+    
     /// TLSMode enum for what form of connection security to enforce.
     public enum TLSMode {
         /// Upgrades the connection to TLS if STARTLS command is received, else sends mail without security.
         case normal
-
+        
         /// Send mail over plaintext and ignore STARTTLS commands and TLS options. Could throw an error if server requires TLS.
         case ignoreTLS
-
+        
         /// Only send mail after an initial successful TLS connection. Connection will fail if a TLS connection cannot be established. The default port, 587, will likely need to be adjusted depending on your server.
         case requireTLS
-
+        
         /// Expect a STARTTLS command from the server and require the connection is upgraded to TLS. Will throw if the server does not issue a STARTTLS command.
         case requireSTARTTLS
     }
-
+    
     /// Initializes an `SMTP` instance.
     ///
     /// - Parameters:
@@ -76,7 +78,7 @@ public struct SMTP {
         self.port = port
         self.tlsMode = tlsMode
         self.tlsConfiguration = tlsConfiguration
-
+        
         let _authMethods = !authMethods.isEmpty ? authMethods : [
             AuthMethod.cramMD5,
             AuthMethod.login,
@@ -88,18 +90,24 @@ public struct SMTP {
             authMethodsDictionary[authMethod.rawValue] = authMethod
         }
         self.authMethods = authMethodsDictionary
-
+        
         self.domainName = domainName
         self.timeout = timeout
     }
-
+    
+    /// Retrieve the complete SMTP transaction log
+    public func getTransactionLog() -> [String] {
+        return transactionLog
+    }
+    
     /// Send an email.
     ///
     /// - Parameters:
     ///     - mail: `Mail` object to send.
     ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
     public func send(_ mail: Mail, completion: ((Error?) -> Void)? = nil) {
-        send([mail], completion:  { (_, failed) in
+        logger.clearLog()
+        send([mail], completion: { (_, failed) in
             if let error = failed.first?.1 {
                 completion?(error)
             } else {
@@ -107,7 +115,7 @@ public struct SMTP {
             }
         })
     }
-
+    
     /// Send multiple emails.
     ///
     /// - Parameters:
@@ -144,13 +152,16 @@ public struct SMTP {
                 tlsConfiguration: tlsConfiguration,
                 authMethods: authMethods,
                 domainName: domainName,
-                timeout: timeout
+                timeout: timeout,
+                logger: logger  // Pass the logger here
             )
-            MailSender(
+            let mailSender = MailSender(
                 socket: socket,
                 mailsToSend: mails,
                 progress: progress,
-                completion: completion).send()
+                completion: completion,
+                logger: logger)
+            mailSender.send()
         } catch {
             completion?([], mails.map { ($0, error) })
         }

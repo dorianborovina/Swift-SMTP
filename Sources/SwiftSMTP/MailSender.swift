@@ -27,7 +27,7 @@ public typealias Progress = ((Mail, Error?) -> Void)?
 ///  sent `Mail`s. [(`Mail`, `Error`)] is an array of failed `Mail`s and their corresponding `Error`s.
 public typealias Completion = (([Mail], [(Mail, Error)]) -> Void)?
 
-class MailSender {
+class MailSender: SMTPSocketDelegate {
     private var socket: SMTPSocket
     private var mailsToSend: [Mail]
     private var progress: Progress
@@ -35,22 +35,34 @@ class MailSender {
     private var sent = [Mail]()
     private var failed = [(Mail, Error)]()
     private var dataSender: DataSender
+    private let logger: SMTPLogger
 
     init(socket: SMTPSocket,
          mailsToSend: [Mail],
          progress: Progress,
-         completion: Completion) {
+         completion: Completion,
+         logger: SMTPLogger) {
         self.socket = socket
         self.mailsToSend = mailsToSend
         self.progress = progress
         self.completion = completion
+        self.logger = logger
         dataSender = DataSender(socket: socket)
+        self.socket.delegate = self
     }
 
     func send() {
         DispatchQueue.global().async {
             self.sendNext()
         }
+    }
+    
+    func smtpSocket(_ socket: SMTPSocket, didSend command: String) {
+        logger.logSent(command)
+    }
+
+    func smtpSocket(_ socket: SMTPSocket, didReceive response: String) {
+        logger.logReceived(response)
     }
 }
 

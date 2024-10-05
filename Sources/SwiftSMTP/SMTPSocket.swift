@@ -18,9 +18,16 @@ import Foundation
 import Socket
 import LoggerAPI
 
+protocol SMTPSocketDelegate: AnyObject {
+    func smtpSocket(_ socket: SMTPSocket, didSend command: String)
+    func smtpSocket(_ socket: SMTPSocket, didReceive response: String)
+}
+
 struct SMTPSocket {
     private let socket: Socket
-
+    let logger: SMTPLogger
+    weak var delegate: SMTPSocketDelegate?
+    
     init(hostname: String,
          email: String,
          password: String,
@@ -29,7 +36,9 @@ struct SMTPSocket {
          tlsConfiguration: TLSConfiguration?,
          authMethods: [String: AuthMethod],
          domainName: String,
-         timeout: UInt) throws {
+         timeout: UInt,
+         logger: SMTPLogger) throws {
+        self.logger = logger
         socket = try Socket.create()
         if tlsMode == .requireTLS {
             if let tlsConfiguration = tlsConfiguration {
@@ -55,17 +64,24 @@ struct SMTPSocket {
     func write(_ text: String) throws {
         _ = try socket.write(from: text + CRLF)
         Log.debug(text)
+        logger.logSent(text)
     }
 
     func write(_ data: Data) throws {
         _ = try socket.write(from: data)
         Log.debug("(sending data)")
+        logger.logSent("(sending data)")
     }
 
     @discardableResult
     func send(_ command: Command) throws -> [Response] {
         try write(command.text)
-        return try parseResponses(readFromSocket(), command: command)
+        delegate?.smtpSocket(self, didSend: command.text)
+        let responses = try parseResponses(readFromSocket(), command: command)
+        for response in responses {
+            delegate?.smtpSocket(self, didReceive: response.response)
+        }
+        return responses
     }
 
     func close() {
