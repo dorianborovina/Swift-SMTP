@@ -27,7 +27,7 @@ public struct SMTP {
     private let authMethods: [String: AuthMethod]
     private let domainName: String
     private let timeout: UInt
-    private var transactionLog: [String] = []
+    public private(set) var transactionLog: [String] = []
     public let logger = SMTPLogger()
     
     /// TLSMode enum for what form of connection security to enforce.
