@@ -54,6 +54,12 @@ public enum SMTPError: Error, CustomStringConvertible {
     /// STARTTLS was required but the server did not request it.
     case requiredSTARTTLS
     
+    /// Connection timed out
+    case connectionTimeout
+
+    /// Failed to connect to the specified hostname and port
+    case connectionFailed(hostname: String, port: Int32)
+    
     /// Description of the `SMTPError`.
     public var description: String {
         switch self {
@@ -67,6 +73,8 @@ public enum SMTPError: Error, CustomStringConvertible {
         case .convertDataUTF8Fail(let buf): return "Error converting Data read from socket to a String: \(buf)."
         case .invalidEmail(let email): return "Invalid email provided for User: \(email)."
         case .requiredSTARTTLS: return "STARTTLS was required but the server did not issue a STARTTLS command."
+        case .connectionTimeout: return "Connection timed out while attempting to connect to the SMTP server."
+        case .connectionFailed(let hostname, let port): return "Failed to connect to \(hostname) on port \(port)."
         }
     }
 

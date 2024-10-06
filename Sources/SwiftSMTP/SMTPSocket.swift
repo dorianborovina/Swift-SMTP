@@ -18,7 +18,7 @@ import Foundation
 import Socket
 import LoggerAPI
 
-struct SMTPSocket {
+class SMTPSocket {
     private let socket: Socket
     let logger: SMTPLogger
     
@@ -34,7 +34,7 @@ struct SMTPSocket {
          logger: SMTPLogger) throws {
         self.logger = logger
         do {
-            socket = try Socket.create()
+            self.socket = try Socket.create()
             logger.logConnection(to: hostname)
             if tlsMode == .requireTLS {
                 logger.log("Initiating TLS connection")
@@ -46,7 +46,32 @@ struct SMTPSocket {
                 logger.log("TLS configuration applied")
             }
             logger.log("Attempting to connect to \(hostname) on port \(port)")
-            try socket.connect(to: hostname, port: port, timeout: timeout * 1000)
+            
+            let group = DispatchGroup()
+            group.enter()
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try self.socket.connect(to: hostname, port: port)
+                    group.leave()
+                } catch {
+                    group.leave()
+                }
+            }
+            
+            let result = group.wait(timeout: .now() + .seconds(Int(timeout)))
+            
+            if result == .timedOut {
+                logger.logError(SMTPError.connectionTimeout, context: "SMTPSocket initialization")
+                throw SMTPError.connectionTimeout
+            }
+            
+            guard self.socket.isConnected else {
+                let error = SMTPError.connectionFailed(hostname: hostname, port: port)
+                logger.logError(error, context: "SMTPSocket initialization")
+                throw error
+            }
+            
             logger.log("Connected successfully")
             let responses = try parseResponses(readFromSocket(), command: .connect)
             logger.log("Received initial server response: \(responses.map { $0.response }.joined(separator: ", "))")
