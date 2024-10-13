@@ -141,7 +141,7 @@ public struct Mail {
         }
 
         dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
-        dictionary["MIME-VERSION"] = "1.0 (Swift-SMTP)"
+        dictionary["MIME-Version"] = "1.0"
 
         for (key, value) in additionalHeaders {
             let keyUppercased = key.uppercased()
