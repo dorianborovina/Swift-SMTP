@@ -66,18 +66,18 @@ extension DataSender {
         // Plain text part
         try send("--\(boundary)\(CRLF)")
         try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
-        try send("Content-Transfer-Encoding: quoted-printable\(CRLF)")
+        try send("Content-Transfer-Encoding: base64\(CRLF)")
         try send(CRLF)
-        try send(text.quotedPrintableEncoded())
+        try send(Data(text.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn]))
         try send(CRLF)
         
         if let html = html {
             // HTML part
             try send("--\(boundary)\(CRLF)")
             try send("Content-Type: text/html; charset=utf-8\(CRLF)")
-            try send("Content-Transfer-Encoding: quoted-printable\(CRLF)")
+            try send("Content-Transfer-Encoding: base64\(CRLF)")
             try send(CRLF)
-            try send(html.quotedPrintableEncoded())
+            try send(Data(html.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn]))
             try send(CRLF)
         }
         
