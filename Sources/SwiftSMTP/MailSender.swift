@@ -183,7 +183,8 @@ class MailSender {
         try socket.send(.dataEnd)
     }
 
-    func login(authMethod: AuthMethod, email: String, password: String) throws {
+    private func login(authMethod: AuthMethod, email: String, password: String) throws {
+        logger.log("Attempting login with method: \(authMethod.rawValue)")
         switch authMethod {
         case .cramMD5:
             try loginCramMD5(email: email, password: password)
@@ -194,6 +195,7 @@ class MailSender {
         case .xoauth2:
             try loginXOAuth2(email: email, accessToken: password)
         }
+        logger.log("Login successful")
     }
 
     func loginCramMD5(email: String, password: String) throws {

@@ -107,10 +107,13 @@ public struct SMTP {
     ///     - completion: Callback when sending finishes. `Error` is nil on success. (optional)
     public func send(_ mail: Mail, completion: ((Error?) -> Void)? = nil) {
         logger.clearLog()
+        logger.log("Attempting to send email to: \(mail.to.map { $0.email }.joined(separator: ", "))")
         send([mail], completion: { (_, failed) in
             if let error = failed.first?.1 {
+                self.logger.log("Failed to send email: \(error.localizedDescription)")
                 completion?(error)
             } else {
+                self.logger.log("Email sent successfully")
                 completion?(nil)
             }
         })
