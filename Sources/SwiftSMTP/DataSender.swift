@@ -60,11 +60,16 @@ extension DataSender {
     // Add custom/default headers to a `Mail`'s text and write it to the socket.
     func sendText(_ text: String, html: String?) throws {
         let boundary = "Swift-SMTP-\(UUID().uuidString)"
-        try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
-        try send(CRLF)
+        
+        if html != nil {
+            try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
+            try send(CRLF)
+        }
         
         // Plain text part
-        try send("--\(boundary)\(CRLF)")
+        if html != nil {
+            try send("--\(boundary)\(CRLF)")
+        }
         try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
         try send("Content-Transfer-Encoding: base64\(CRLF)")
         try send(CRLF)
@@ -79,9 +84,10 @@ extension DataSender {
             try send(CRLF)
             try send(Data(html.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn]))
             try send(CRLF)
+            
+            // Close the multipart message
+            try send("--\(boundary)--\(CRLF)")
         }
-        
-        try send("--\(boundary)--\(CRLF)")
     }
 
     // Send `mail`'s content that is more than just plain text

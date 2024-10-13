@@ -172,33 +172,40 @@ public struct SMTP {
     }
 
     // Add this new method to handle creating the email content
-    private func createEmailContent(_ mail: Mail) -> String {
-        var message = "To: \(mail.to.map { $0.email }.joined(separator: ", "))\r\n"
-        message += "From: \(mail.from.email)\r\n"
-        message += "Subject: \(mail.subject)\r\n"
-        
-        if let html = mail.html {
-            let boundary = "Swift-SMTP-\(UUID().uuidString)"
-            message += "MIME-Version: 1.0\r\n"
-            message += "Content-Type: multipart/alternative; boundary=\"\(boundary)\"\r\n\r\n"
+        private func createEmailContent(_ mail: Mail) -> String {
+            var message = mail.headersString + CRLF
             
-            // Plain text part
-            message += "--\(boundary)\r\n"
-            message += "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
-            message += "\(mail.text)\r\n\r\n"
+            if let html = mail.html {
+                let boundary = "Swift-SMTP-\(UUID().uuidString)"
+                message += "Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)"
+                message += CRLF
+                
+                // Plain text part
+                message += "--\(boundary)\(CRLF)"
+                message += "Content-Type: text/plain; charset=UTF-8\(CRLF)"
+                message += "Content-Transfer-Encoding: base64\(CRLF)"
+                message += CRLF
+                message += Data(mail.text.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn])
+                message += CRLF + CRLF
+                
+                // HTML part
+                message += "--\(boundary)\(CRLF)"
+                message += "Content-Type: text/html; charset=UTF-8\(CRLF)"
+                message += "Content-Transfer-Encoding: base64\(CRLF)"
+                message += CRLF
+                message += Data(html.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn])
+                message += CRLF + CRLF
+                
+                message += "--\(boundary)--\(CRLF)"
+            } else {
+                message += "Content-Type: text/plain; charset=UTF-8\(CRLF)"
+                message += "Content-Transfer-Encoding: base64\(CRLF)"
+                message += CRLF
+                message += Data(mail.text.utf8).base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn])
+                message += CRLF
+            }
             
-            // HTML part
-            message += "--\(boundary)\r\n"
-            message += "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-            message += "\(html)\r\n\r\n"
-            
-            message += "--\(boundary)--\r\n"
-        } else {
-            message += "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
-            message += "\(mail.text)\r\n"
+            return message
         }
-        
-        return message
     }
-}
 

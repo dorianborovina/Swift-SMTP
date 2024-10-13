@@ -122,6 +122,15 @@ public struct Mail {
         }
         return (nil, attachments)
     }
+    
+    public var contentType: String {
+        if html != nil {
+            let boundary = "Swift-SMTP-\(UUID().uuidString)"
+            return "multipart/alternative; boundary=\"\(boundary)\""
+        } else {
+            return "text/plain; charset=UTF-8"
+        }
+    }
 
     private var headersDictionary: [String: String] {
         var dictionary = [String: String]()
@@ -131,6 +140,7 @@ public struct Mail {
         dictionary["TO"] = to.map { $0.mime }.joined(separator: ", ")
         dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
         dictionary["MIME-Version"] = "1.0"
+        dictionary["Content-Type"] = contentType
 
         if !cc.isEmpty {
             dictionary["CC"] = cc.map { $0.mime }.joined(separator: ", ")
