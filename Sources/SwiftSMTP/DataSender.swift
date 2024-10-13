@@ -66,18 +66,18 @@ extension DataSender {
         // Plain text part
         try send("--\(boundary)\(CRLF)")
         try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
-        try send("Content-Transfer-Encoding: 7bit\(CRLF)")
+        try send("Content-Transfer-Encoding: quoted-printable\(CRLF)")
         try send(CRLF)
-        try send(text)
+        try send(text.quotedPrintableEncoded())
         try send(CRLF)
         
         if let html = html {
             // HTML part
             try send("--\(boundary)\(CRLF)")
             try send("Content-Type: text/html; charset=utf-8\(CRLF)")
-            try send("Content-Transfer-Encoding: 7bit\(CRLF)")
+            try send("Content-Transfer-Encoding: quoted-printable\(CRLF)")
             try send(CRLF)
-            try send(html)
+            try send(html.quotedPrintableEncoded())
             try send(CRLF)
         }
         
@@ -287,10 +287,10 @@ private extension String {
 
 extension String {
     func quotedPrintableEncoded() -> String {
-        let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!*+-/=_")
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!*+-/=_")
         var result = ""
         for character in self {
-            if allowedCharacters.contains(character.unicodeScalars.first!) {
+            if allowed.contains(character.unicodeScalars.first!) {
                 result.append(character)
             } else {
                 let unicode = character.unicodeScalars.first!.value
