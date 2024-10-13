@@ -129,19 +129,12 @@ public struct Mail {
         dictionary["DATE"] = Date().smtpFormatted
         dictionary["FROM"] = from.mime
         dictionary["TO"] = to.map { $0.mime }.joined(separator: ", ")
+        dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
+        dictionary["MIME-Version"] = "1.0"
 
         if !cc.isEmpty {
             dictionary["CC"] = cc.map { $0.mime }.joined(separator: ", ")
         }
-        
-        if html != nil {
-            dictionary["Content-Type"] = "multipart/alternative; boundary=\"Swift-SMTP-Boundary\""
-        } else {
-            dictionary["Content-Type"] = "text/plain; charset=utf-8"
-        }
-
-        dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
-        dictionary["MIME-Version"] = "1.0"
 
         for (key, value) in additionalHeaders {
             let keyUppercased = key.uppercased()
