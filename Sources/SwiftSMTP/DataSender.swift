@@ -40,7 +40,7 @@ struct DataSender {
             if mail.hasAttachment {
                 try sendMixed(mail)
             } else {
-                try sendText(mail.text)
+                try sendText(mail.text, html: mail.html)
             }
             logger.logSent("(email content)")
         } catch {
@@ -50,6 +50,7 @@ struct DataSender {
     }
 }
 
+
 extension DataSender {
     // Send the headers of a `Mail`
     func sendHeaders(_ headers: String) throws {
@@ -57,8 +58,22 @@ extension DataSender {
     }
 
     // Add custom/default headers to a `Mail`'s text and write it to the socket.
-    func sendText(_ text: String) throws {
-        try send(text.embedded)
+    func sendText(_ text: String, html: String?) throws {
+        if let html = html {
+            let boundary = "Swift-SMTP-\(UUID().uuidString)"
+            try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
+            try send("\(CRLF)--\(boundary)\(CRLF)")
+            try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
+            try send("Content-Transfer-Encoding: 7bit\(CRLF)")
+            try send("\(CRLF)\(text)\(CRLF)")
+            try send("--\(boundary)\(CRLF)")
+            try send("Content-Type: text/html; charset=utf-8\(CRLF)")
+            try send("Content-Transfer-Encoding: 7bit\(CRLF)")
+            try send("\(CRLF)\(html)\(CRLF)")
+            try send("--\(boundary)--\(CRLF)")
+        } else {
+            try send(text.embedded)
+        }
     }
 
     // Send `mail`'s content that is more than just plain text
@@ -83,7 +98,7 @@ extension DataSender {
             try send(alternativeHeader)
 
             try send(boundary.startLine)
-            try sendText(mail.text)
+            try sendText(mail.text, html: mail.html)
 
             try send(boundary.startLine)
             try sendAttachment(alternative)
@@ -92,7 +107,7 @@ extension DataSender {
             return
         }
 
-        try sendText(mail.text)
+        try sendText(mail.text, html: mail.html)
     }
 
     // Sends the attachments of a `Mail`.
