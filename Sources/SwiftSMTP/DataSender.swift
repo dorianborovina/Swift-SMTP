@@ -59,21 +59,29 @@ extension DataSender {
 
     // Add custom/default headers to a `Mail`'s text and write it to the socket.
     func sendText(_ text: String, html: String?) throws {
+        let boundary = "Swift-SMTP-\(UUID().uuidString)"
+        try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
+        try send(CRLF)
+        
+        // Plain text part
+        try send("--\(boundary)\(CRLF)")
+        try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
+        try send("Content-Transfer-Encoding: 7bit\(CRLF)")
+        try send(CRLF)
+        try send(text)
+        try send(CRLF)
+        
         if let html = html {
-            let boundary = "Swift-SMTP-\(UUID().uuidString)"
-            try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
-            try send("\(CRLF)--\(boundary)\(CRLF)")
-            try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
-            try send("Content-Transfer-Encoding: 7bit\(CRLF)")
-            try send("\(CRLF)\(text)\(CRLF)")
+            // HTML part
             try send("--\(boundary)\(CRLF)")
             try send("Content-Type: text/html; charset=utf-8\(CRLF)")
             try send("Content-Transfer-Encoding: 7bit\(CRLF)")
-            try send("\(CRLF)\(html)\(CRLF)")
-            try send("--\(boundary)--\(CRLF)")
-        } else {
-            try send(text.embedded)
+            try send(CRLF)
+            try send(html)
+            try send(CRLF)
         }
+        
+        try send("--\(boundary)--\(CRLF)")
     }
 
     // Send `mail`'s content that is more than just plain text

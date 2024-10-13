@@ -133,6 +133,12 @@ public struct Mail {
         if !cc.isEmpty {
             dictionary["CC"] = cc.map { $0.mime }.joined(separator: ", ")
         }
+        
+        if html != nil {
+            dictionary["Content-Type"] = "multipart/alternative; boundary=\"Swift-SMTP-Boundary\""
+        } else {
+            dictionary["Content-Type"] = "text/plain; charset=utf-8"
+        }
 
         dictionary["SUBJECT"] = subject.mimeEncoded ?? ""
         dictionary["MIME-VERSION"] = "1.0 (Swift-SMTP)"
