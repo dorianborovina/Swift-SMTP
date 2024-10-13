@@ -38,6 +38,9 @@ public struct Mail {
 
     /// Text of the `Mail`. Defaults to none.
     public let text: String
+    
+    /// HTML content of the `Mail`. Defaults to none.
+    public let html: String?
 
     /// Array of `Attachment`s for the `Mail`. If the `Mail` has multiple `Attachment`s that are alternatives to plain
     /// text, the last one will be used as the alternative (all the `Attachments` will still be sent). Defaults to none.
@@ -76,6 +79,7 @@ public struct Mail {
     ///     - bcc: Array of `User`s to bcc. Defaults to none.
     ///     - subject: Subject of the `Mail`. Defaults to none.
     ///     - text: Text of the `Mail`. Defaults to none.
+    ///     - html: HTML content of the `Mail`. Defaults to none.
     ///     - attachments: Array of `Attachment`s for the `Mail`. If the `Mail` has multiple `Attachment`s that are
     ///       alternatives to plain text, the last one will be used as the alternative (all the `Attachments` will still
     ///       be sent). Defaults to none.
@@ -88,6 +92,7 @@ public struct Mail {
                 bcc: [User] = [],
                 subject: String = "",
                 text: String = "",
+                html: String? = nil,
                 attachments: [Attachment] = [],
                 additionalHeaders: [String: String] = [:]) {
         self.from = from
@@ -96,6 +101,7 @@ public struct Mail {
         self.bcc = bcc
         self.subject = subject
         self.text = text
+        self.html = html
 
         let (alternative, attachments) = Mail.getAlternative(attachments)
         self.alternative = alternative
@@ -150,7 +156,7 @@ public struct Mail {
     }
 
     var hasAttachment: Bool {
-        return !attachments.isEmpty || alternative != nil
+        return !attachments.isEmpty || alternative != nil || html != nil
     }
 }
 
