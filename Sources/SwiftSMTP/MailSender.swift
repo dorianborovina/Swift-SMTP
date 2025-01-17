@@ -70,6 +70,7 @@ class MailSender {
             }
             return
         }
+        
         let mail = mailsToSend.removeFirst()
         do {
             logger.log("Attempting to send email: \(mail.subject)")
@@ -86,53 +87,57 @@ class MailSender {
             }
             progress?(mail, error)
         }
+        
         DispatchQueue.global().async {
             self.sendNext()
         }
     }
 
     private func quit() throws {
-        logger.log("Initiating SMTP quit sequence")
+        logger.logQuit()
         try socket.send(.quit)
         socket.close()
-        logger.log("SMTP session closed")
+        logger.logDisconnection()
     }
 
     private func send(_ mail: Mail) throws {
         let recipientEmails = try getRecipientEmails(from: mail)
         try validateEmails(recipientEmails)
+        
+        // Log MAIL FROM
+        logger.logMailFrom(address: mail.from.email)
         try sendMail(mail.from.email)
+        
+        // Log RCPT TO for each recipient
+        for recipient in recipientEmails {
+            logger.logRcptTo(address: recipient)
+        }
         try sendTo(recipientEmails)
+        
+        // Log DATA phase
+        logger.logDataStart()
         try data()
         try dataSender.send(mail)
         try dataEnd()
+        logger.logDataEnd()
     }
 
-    private func createEmailContent(_ mail: Mail) -> String {
-        var message = mail.headersString + "\r\n"
-        
-        if let html = mail.html {
-            let boundary = "Swift-SMTP-\(UUID().uuidString)"
-            message += "MIME-Version: 1.0\r\n"
-            message += "Content-Type: multipart/alternative; boundary=\"\(boundary)\"\r\n\r\n"
-            
-            // Plain text part
-            message += "--\(boundary)\r\n"
-            message += "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
-            message += "\(mail.text)\r\n\r\n"
-            
-            // HTML part
-            message += "--\(boundary)\r\n"
-            message += "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-            message += "\(html)\r\n\r\n"
-            
-            message += "--\(boundary)--\r\n"
-        } else {
-            message += "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
-            message += "\(mail.text)\r\n"
+    private func sendMail(_ from: String) throws {
+        try socket.send(.mail(from))
+    }
+
+    private func sendTo(_ emails: [String]) throws {
+        for email in emails {
+            try socket.send(.rcpt(email))
         }
-        
-        return message
+    }
+
+    private func data() throws {
+        try socket.send(.data)
+    }
+
+    private func dataEnd() throws {
+        try socket.send(.dataEnd)
     }
 
     private func getRecipientEmails(from mail: Mail) throws -> [String] {
@@ -152,6 +157,7 @@ class MailSender {
         for email in emails {
             do {
                 if try !email.isValidEmail() {
+                    logger.logError(SMTPError.invalidEmail(email: email), context: "Validating email: \(email)")
                     throw SMTPError.invalidEmail(email: email)
                 }
             } catch {
@@ -161,30 +167,8 @@ class MailSender {
         }
     }
 
-    private func sendMail(_ from: String) throws {
-        logger.log("Sending MAIL FROM command: \(from)")
-        try socket.send(.mail(from))
-    }
-
-    private func sendTo(_ emails: [String]) throws {
-        for email in emails {
-            logger.log("Sending RCPT TO command: \(email)")
-            try socket.send(.rcpt(email))
-        }
-    }
-
-    private func data() throws {
-        logger.log("Sending DATA command")
-        try socket.send(.data)
-    }
-
-    private func dataEnd() throws {
-        logger.log("Sending end of data")
-        try socket.send(.dataEnd)
-    }
-
     private func login(authMethod: AuthMethod, email: String, password: String) throws {
-        logger.log("Attempting login with method: \(authMethod.rawValue)")
+        logger.logAuthAttempt(method: authMethod.rawValue)
         switch authMethod {
         case .cramMD5:
             try loginCramMD5(email: email, password: password)
@@ -195,7 +179,7 @@ class MailSender {
         case .xoauth2:
             try loginXOAuth2(email: email, accessToken: password)
         }
-        logger.log("Login successful")
+        logger.logAuthSuccess()
     }
 
     func loginCramMD5(email: String, password: String) throws {

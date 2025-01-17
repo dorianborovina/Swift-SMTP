@@ -21,49 +21,48 @@ import Foundation
 // The email is not actually sent until we have indicated that we are done sending its contents with a `CRLF CRLF`.
 // This is handled by `Sender`.
 struct DataSender {
-    // Socket we use to read and write data to
     private let socket: SMTPSocket
     private let logger: SMTPLogger
 
-    // Init a new instance of `DataSender`
     init(socket: SMTPSocket, logger: SMTPLogger) {
         self.socket = socket
-        self.logger = logger  // This line was correct, the error message was misleading
+        self.logger = logger
     }
 
-    // Send the text and attachments of the `mail`
     func send(_ mail: Mail) throws {
         do {
+            logger.log("Starting to send email data")
             try sendHeaders(mail.headersString)
-            logger.logSent("(email headers)")
+            logger.log("Email headers sent successfully")
 
             if mail.hasAttachment {
+                logger.log("Email contains attachments, sending as multipart")
                 try sendMixed(mail)
             } else {
+                logger.log("Email is text-only, sending content")
                 try sendText(mail.text, html: mail.html)
             }
-            logger.logSent("(email content)")
+            logger.log("Email content sent successfully")
         } catch {
             logger.logError(error, context: "Sending mail data")
             throw error
         }
     }
-}
 
-
-extension DataSender {
-    // Send the headers of a `Mail`
     func sendHeaders(_ headers: String) throws {
+        logger.log("Sending email headers")
         try send(headers)
     }
 
-    // Add custom/default headers to a `Mail`'s text and write it to the socket.
     func sendText(_ text: String, html: String?) throws {
         let boundary = "Swift-SMTP-\(UUID().uuidString)"
         
         if html != nil {
+            logger.log("Sending multipart alternative content (text + HTML)")
             try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
             try send(CRLF)
+        } else {
+            logger.log("Sending plain text content")
         }
         
         // Plain text part
@@ -77,7 +76,7 @@ extension DataSender {
         try send(CRLF)
         
         if let html = html {
-            // HTML part
+            logger.log("Sending HTML content")
             try send("--\(boundary)\(CRLF)")
             try send("Content-Type: text/html; charset=utf-8\(CRLF)")
             try send("Content-Transfer-Encoding: 7bit\(CRLF)")
@@ -85,13 +84,13 @@ extension DataSender {
             try send(html)
             try send(CRLF)
             
-            // Close the multipart message
             try send("--\(boundary)--\(CRLF)")
+            logger.log("HTML content sent successfully")
         }
     }
 
-    // Send `mail`'s content that is more than just plain text
     func sendMixed(_ mail: Mail) throws {
+        logger.log("Starting to send mixed content email")
         let boundary = String.makeBoundary()
         let mixedHeader = String.makeMixedHeader(boundary: boundary)
 
@@ -101,12 +100,12 @@ extension DataSender {
         try sendAlternative(for: mail)
 
         try sendAttachments(mail.attachments, boundary: boundary)
+        logger.log("Mixed content email sent successfully")
     }
 
-    // If `mail` has an attachment that is an alternative to plain text, sends that attachment and the plain text.
-    // Else just sends the plain text.
     func sendAlternative(for mail: Mail) throws {
         if let alternative = mail.alternative {
+            logger.log("Sending alternative content")
             let boundary = String.makeBoundary()
             let alternativeHeader = String.makeAlternativeHeader(boundary: boundary)
             try send(alternativeHeader)
@@ -118,26 +117,29 @@ extension DataSender {
             try sendAttachment(alternative)
 
             try send(boundary.endLine)
+            logger.log("Alternative content sent successfully")
             return
         }
 
         try sendText(mail.text, html: mail.html)
     }
 
-    // Sends the attachments of a `Mail`.
     func sendAttachments(_ attachments: [Attachment], boundary: String) throws {
-        for attachment in attachments {
+        logger.log("Starting to send \(attachments.count) attachments")
+        for (index, attachment) in attachments.enumerated() {
             try send(boundary.startLine)
+            logger.log("Sending attachment \(index + 1) of \(attachments.count)")
             try sendAttachment(attachment)
         }
         try send(boundary.endLine)
+        logger.log("All attachments sent successfully")
     }
 
-    // Send the `attachment`.
     func sendAttachment(_ attachment: Attachment) throws {
         var relatedBoundary = ""
 
         if attachment.hasRelated {
+            logger.log("Sending attachment with related content")
             relatedBoundary = String.makeBoundary()
             let relatedHeader = String.makeRelatedHeader(boundary: relatedBoundary)
             try send(relatedHeader)
@@ -148,9 +150,17 @@ extension DataSender {
         try send(attachmentHeader)
 
         switch attachment.type {
-        case .data(let data, _, _, _): try sendData(data)
-        case .file(let path, _, _, _): try sendFile(at: path)
-        case .html(let content, _, _): try sendHTML(content)
+        case .data(let data, let mime, let name, _):
+            logger.log("Sending data attachment: \(name) (\(mime)) - \(data.count) bytes")
+            try sendData(data)
+            
+        case .file(let path, let mime, let name, _):
+            logger.log("Sending file attachment: \(name) (\(mime)) from path: \(path)")
+            try sendFile(at: path)
+            
+        case .html(let content, let charset, _):
+            logger.log("Sending HTML attachment (charset: \(charset)) - \(content.count) characters")
+            try sendHTML(content)
         }
 
         try send("")
@@ -160,21 +170,24 @@ extension DataSender {
         }
     }
 
-    // Send a data attachment. Data must be base 64 encoded before sending.
-    // Checks if the base 64 encoded version has been cached first.
     func sendData(_ data: Data) throws {
+        logger.log("Processing data attachment (\(data.count) bytes)")
         #if os(macOS)
             if let encodedData = cache.object(forKey: data as AnyObject) as? Data {
+                logger.log("Using cached encoded data")
                 return try send(encodedData)
             }
         #else
             if let encodedData = cache.object(forKey: NSData(data: data) as AnyObject) as? Data {
+                logger.log("Using cached encoded data")
                 return try send(encodedData)
             }
         #endif
 
+        logger.log("Encoding data attachment")
         let encodedData = data.base64EncodedData(options: .lineLength76Characters)
         try send(encodedData)
+        logger.log("Data attachment sent successfully")
 
         #if os(macOS)
             cache.setObject(encodedData as AnyObject, forKey: data as AnyObject)
@@ -183,26 +196,30 @@ extension DataSender {
         #endif
     }
 
-    // Sends a local file at the given path. File must be base 64 encoded before sending. Checks the cache first.
-    // Throws an error if file could not be found.
     func sendFile(at path: String) throws {
+        logger.log("Processing file attachment from: \(path)")
         #if os(macOS)
             if let data = cache.object(forKey: path as AnyObject) as? Data {
+                logger.log("Using cached file data")
                 return try send(data)
             }
         #else
             if let data = cache.object(forKey: NSString(string: path) as AnyObject) as? Data {
+                logger.log("Using cached file data")
                 return try send(data)
             }
         #endif
 
         guard let file = FileHandle(forReadingAtPath: path) else {
+            logger.logError(SMTPError.fileNotFound(path: path), context: "Opening file attachment")
             throw SMTPError.fileNotFound(path: path)
         }
 
+        logger.log("Reading and encoding file data")
         let data = file.readDataToEndOfFile().base64EncodedData(options: .lineLength76Characters)
         try send(data)
         file.closeFile()
+        logger.log("File attachment sent successfully")
 
         #if os(macOS)
             cache.setObject(data as AnyObject, forKey: path as AnyObject)
@@ -211,21 +228,24 @@ extension DataSender {
         #endif
     }
 
-    // Send an HTML attachment. HTML must be base 64 encoded before sending.
-    // Checks if the base 64 encoded version is in cache first.
     func sendHTML(_ html: String) throws {
+        logger.log("Processing HTML attachment")
         #if os(macOS)
             if let encodedHTML = cache.object(forKey: html as AnyObject) as? String {
+                logger.log("Using cached HTML data")
                 return try send(encodedHTML)
             }
         #else
             if let encodedHTML = cache.object(forKey: NSString(string: html) as AnyObject) as? String {
+                logger.log("Using cached HTML data")
                 return try send(encodedHTML)
             }
         #endif
 
+        logger.log("Encoding HTML content")
         let encodedHTML = html.data(using: .utf8)?.base64EncodedData(options: .lineLength76Characters) ?? Data()
         try send(encodedHTML)
+        logger.log("HTML attachment sent successfully")
 
         #if os(macOS)
             cache.setObject(encodedHTML as AnyObject, forKey: html as AnyObject)
@@ -236,7 +256,6 @@ extension DataSender {
 }
 
 private extension DataSender {
-    // Write `text` to the socket.
     func send(_ text: String) throws {
         logger.logSent(text)
         try socket.write(text)

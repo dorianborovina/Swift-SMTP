@@ -36,17 +36,19 @@ class SMTPSocket {
         do {
             self.socket = try Socket.create()
             logger.logConnection(to: hostname)
+            
             if tlsMode == .requireTLS {
-                logger.log("Initiating TLS connection")
+                logger.log("Initiating direct TLS connection")
                 if let tlsConfiguration = tlsConfiguration {
                     socket.delegate = try tlsConfiguration.makeSSLService()
+                    logger.log("Using provided TLS configuration")
                 } else {
                     socket.delegate = try TLSConfiguration().makeSSLService()
+                    logger.log("Using default TLS configuration")
                 }
-                logger.log("TLS configuration applied")
             }
-            logger.log("Attempting to connect to \(hostname) on port \(port)")
             
+            logger.log("Attempting to connect to \(hostname) on port \(port)")
             let group = DispatchGroup()
             group.enter()
             
@@ -62,40 +64,90 @@ class SMTPSocket {
             let result = group.wait(timeout: .now() + .seconds(Int(timeout)))
             
             if result == .timedOut {
-                logger.logError(SMTPError.connectionTimeout, context: "SMTPSocket initialization")
+                logger.logTimeout()
                 throw SMTPError.connectionTimeout
             }
             
             guard self.socket.isConnected else {
                 let error = SMTPError.connectionFailed(hostname: hostname, port: port)
-                logger.logError(error, context: "SMTPSocket initialization")
+                logger.logError(error, context: "Socket connection")
                 throw error
             }
             
-            logger.log("Connected successfully")
-            let responses = try parseResponses(readFromSocket(), command: .connect)
-            logger.log("Received initial server response: \(responses.map { $0.response }.joined(separator: ", "))")
+            logger.log("Connection established successfully")
+            _ = try parseResponses(readFromSocket(), command: .connect)
+            logger.log("Initial server greeting received")
+            
             var serverOptions = try getServerOptions(domainName: domainName)
+            logger.log("Retrieved server capabilities")
+            
             if tlsMode == .requireSTARTTLS || tlsMode == .normal {
                 if try doStarttls(serverOptions: serverOptions, tlsConfiguration: tlsConfiguration) {
                     logger.log("STARTTLS completed successfully")
                     serverOptions = try getServerOptions(domainName: domainName)
+                    logger.log("Retrieved updated server capabilities after STARTTLS")
                 } else if tlsMode == .requireSTARTTLS {
+                    logger.logError(SMTPError.requiredSTARTTLS, context: "STARTTLS requirement")
                     throw SMTPError.requiredSTARTTLS
                 }
             }
+            
             let authMethod = try getAuthMethod(authMethods: authMethods, serverOptions: serverOptions, hostname: hostname)
             try login(authMethod: authMethod, email: email, password: password)
+            
         } catch {
             logger.logError(error, context: "SMTPSocket initialization")
             throw error
         }
     }
 
+    private func getAuthMethod(authMethods: [String: AuthMethod], serverOptions: [Response], hostname: String) throws -> AuthMethod {
+        logger.log("Determining authentication method")
+        for option in serverOptions {
+            let components = option.message.components(separatedBy: " ")
+            if components.first == "AUTH" {
+                let _authMethods = components.dropFirst()
+                for authMethod in _authMethods {
+                    if let matchingAuthMethod = authMethods[authMethod] {
+                        logger.log("Selected auth method: \(matchingAuthMethod.rawValue)")
+                        return matchingAuthMethod
+                    }
+                }
+            }
+        }
+        logger.logError(SMTPError.noAuthMethodsOrRequiresTLS(hostname: hostname), context: "Determining auth method")
+        throw SMTPError.noAuthMethodsOrRequiresTLS(hostname: hostname)
+    }
+
+    private func getResponseCode(_ response: String, command: Command) throws -> ResponseCode {
+        guard response.count > 3 else {
+            logger.logError(SMTPError.badResponse(command: command.text, response: response), context: "Getting response code")
+            throw SMTPError.badResponse(command: command.text, response: response)
+        }
+        
+        let codeString = String(response[..<response.index(response.startIndex, offsetBy: 3)])
+        guard let code = Int(codeString) else {
+            logger.logError(SMTPError.badResponse(command: command.text, response: response), context: "Parsing response code")
+            throw SMTPError.badResponse(command: command.text, response: response)
+        }
+        
+        let responseCode = ResponseCode(code)
+        guard command.expectedResponseCodes.contains(responseCode) else {
+            logger.logError(SMTPError.badResponse(command: command.text, response: response), context: "Validating response code")
+            throw SMTPError.badResponse(command: command.text, response: response)
+        }
+        
+        return responseCode
+    }
+
+    private func getResponseMessage(_ response: String) -> String {
+        guard response.count > 4 else { return "" }
+        return String(response[response.index(response.startIndex, offsetBy: 4)...])
+    }
+
     func write(_ text: String) throws {
         do {
             _ = try socket.write(from: text + CRLF)
-            Log.debug(text)
             logger.logSent(text)
         } catch {
             logger.logError(error, context: "Writing to socket")
@@ -106,7 +158,6 @@ class SMTPSocket {
     func write(_ data: Data) throws {
         do {
             _ = try socket.write(from: data)
-            Log.debug("(sending data)")
             logger.logSent("(sending data: \(data.count) bytes)")
         } catch {
             logger.logError(error, context: "Writing data to socket")
@@ -141,9 +192,9 @@ class SMTPSocket {
         do {
             _ = try socket.read(into: &buf)
             guard let responses = String(data: buf, encoding: .utf8) else {
+                logger.logError(SMTPError.convertDataUTF8Fail(data: buf), context: "Reading from socket")
                 throw SMTPError.convertDataUTF8Fail(data: buf)
             }
-            Log.debug(responses)
             return responses
         } catch {
             logger.logError(error, context: "Reading from socket")
@@ -154,12 +205,13 @@ class SMTPSocket {
     private func parseResponses(_ responses: String, command: Command) throws -> [Response] {
         let responsesArray = responses.components(separatedBy: CRLF)
         guard !responsesArray.isEmpty else {
+            logger.logError(SMTPError.badResponse(command: command.text, response: responses), context: "Parsing responses")
             throw SMTPError.badResponse(command: command.text, response: responses)
         }
+        
         return try responsesArray.compactMap { response in
-            guard response != "" else {
-                return nil
-            }
+            guard !response.isEmpty else { return nil }
+            
             logger.logReceived(response)
             return Response(
                 code: try getResponseCode(response, command: command),
@@ -169,54 +221,14 @@ class SMTPSocket {
         }
     }
 
-    private func getResponseCode(_ response: String, command: Command) throws -> ResponseCode {
-        guard response.count > 3 else {
-            throw SMTPError.badResponse(command: command.text, response: response)
-        }
-        guard let code = Int(response[..<response.index(response.startIndex, offsetBy: 3)]) else {
-            throw SMTPError.badResponse(command: command.text, response: response)
-        }
-        guard
-            response.count > 2,
-            command.expectedResponseCodes.map({ $0.rawValue }).contains(code) else {
-                throw SMTPError.badResponse(command: command.text, response: response)
-        }
-        return ResponseCode(code)
-    }
-
-    private func getResponseMessage(_ response: String) -> String {
-        guard response.count > 3 else {
-            return ""
-        }
-        return String(response[response.index(response.startIndex, offsetBy: 4)...])
-    }
-
     private func getServerOptions(domainName: String) throws -> [Response] {
-        logger.log("Retrieving server options")
+        logger.log("Retrieving server capabilities")
         do {
             return try send(.ehlo(domainName))
         } catch {
-            logger.log("EHLO command failed, attempting HELO")
+            logger.log("EHLO command failed, falling back to HELO")
             return try send(.helo(domainName))
         }
-    }
-
-    private func getAuthMethod(authMethods: [String: AuthMethod], serverOptions: [Response], hostname: String) throws -> AuthMethod {
-        logger.log("Determining authentication method")
-        for option in serverOptions {
-            let components = option.message.components(separatedBy: " ")
-            if components.first == "AUTH" {
-                let _authMethods = components.dropFirst()
-                for authMethod in _authMethods {
-                    if let matchingAuthMethod = authMethods[authMethod] {
-                        logger.log("Selected auth method: \(matchingAuthMethod.rawValue)")
-                        return matchingAuthMethod
-                    }
-                }
-            }
-        }
-        logger.logError(SMTPError.noAuthMethodsOrRequiresTLS(hostname: hostname), context: "Determining auth method")
-        throw SMTPError.noAuthMethodsOrRequiresTLS(hostname: hostname)
     }
 
     private func doStarttls(serverOptions: [Response], tlsConfiguration: TLSConfiguration?) throws -> Bool {
@@ -226,25 +238,27 @@ class SMTPSocket {
                 return true
             }
         }
+        logger.log("STARTTLS not available on server")
         return false
     }
 
     private func starttls(tlsConfiguration: TLSConfiguration?) throws {
-        logger.log("Initiating STARTTLS")
+        logger.logStartTLS()
         try send(.starttls)
-        logger.log("STARTTLS command sent, upgrading connection")
         if let tlsConfiguration = tlsConfiguration {
             socket.delegate = try tlsConfiguration.makeSSLService()
+            logger.log("Using provided TLS configuration")
         } else {
             socket.delegate = try TLSConfiguration().makeSSLService()
+            logger.log("Using default TLS configuration")
         }
         try socket.delegate?.initialize(asServer: false)
         try socket.delegate?.onConnect(socket: socket)
-        logger.log("TLS connection established")
+        logger.logTLSSuccess()
     }
 
     private func login(authMethod: AuthMethod, email: String, password: String) throws {
-        logger.log("Attempting login with method: \(authMethod.rawValue)")
+        logger.logAuthAttempt(method: authMethod.rawValue)
         switch authMethod {
         case .cramMD5:
             try loginCramMD5(email: email, password: password)
@@ -255,7 +269,7 @@ class SMTPSocket {
         case .xoauth2:
             try loginXOAuth2(email: email, accessToken: password)
         }
-        logger.log("Login successful")
+        logger.logAuthSuccess()
     }
 
     private func loginCramMD5(email: String, password: String) throws {
