@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  SMTPLogger.swift
 //  SwiftSMTP
 //
 //  Created by Dorian Borovina on 05.10.24.
@@ -9,9 +9,11 @@ import Foundation
 
 public class SMTPLogger {
     public private(set) var transactionLog: [String] = []
+    private var lastLogMessage: String?
     
     public func clearLog() {
         transactionLog.removeAll()
+        lastLogMessage = nil
     }
     
     public func logConnection(to hostname: String) {
@@ -106,7 +108,19 @@ public class SMTPLogger {
     public func log(_ message: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         let logEntry = "[\(timestamp)] \(message)"
+        
+        // Extract content without timestamp for comparison
+        let contentWithoutTimestamp = message
+        
+        // Check if this message is a duplicate of the last one
+        if let lastMessage = lastLogMessage,
+           lastMessage == contentWithoutTimestamp {
+            // Skip duplicate message
+            return
+        }
+        
         transactionLog.append(logEntry)
+        lastLogMessage = contentWithoutTimestamp
     }
     
     // Helper method to get the complete transaction log as a string
