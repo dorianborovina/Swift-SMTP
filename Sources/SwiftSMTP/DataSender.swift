@@ -69,8 +69,6 @@ struct DataSender {
         if html != nil {
             try send("--\(boundary)\(CRLF)")
         }
-        try send("Content-Type: text/plain; charset=utf-8\(CRLF)")
-        try send("Content-Transfer-Encoding: 7bit\(CRLF)")
         try send(CRLF)
         try send(text)
         try send(CRLF)
@@ -78,8 +76,6 @@ struct DataSender {
         if let html = html {
             logger.log("Sending HTML content")
             try send("--\(boundary)\(CRLF)")
-            try send("Content-Type: text/html; charset=utf-8\(CRLF)")
-            try send("Content-Transfer-Encoding: 7bit\(CRLF)")
             try send(CRLF)
             try send(html)
             try send(CRLF)
