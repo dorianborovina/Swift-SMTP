@@ -53,6 +53,14 @@ public struct Mail {
     /// Defaults to none. The following will be ignored: CONTENT-TYPE, CONTENT-DISPOSITION, CONTENT-TRANSFER-ENCODING.
     public let additionalHeaders: [String: String]
 
+    /// Stable boundary used for the outer multipart container. Generated once at init so that the
+    /// Content-Type header in the message and the boundary used in the body always match.
+    public let outerBoundary: String
+
+    /// Stable boundary used for an inner multipart/alternative container nested inside a
+    /// multipart/mixed message (when both attachments and HTML/alternative content are present).
+    public let innerBoundary: String
+
     /// Logs detailed information about the mail for diagnostic purposes
     public func logDetails(_ logger: SMTPLogger) {
         logger.log("Mail Details:")
@@ -167,6 +175,13 @@ public struct Mail {
         self.attachments = attachments
 
         self.additionalHeaders = additionalHeaders
+
+        self.outerBoundary = Mail.makeBoundary()
+        self.innerBoundary = Mail.makeBoundary()
+    }
+
+    private static func makeBoundary() -> String {
+        return "Swift-SMTP-" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
     private static func getAlternative(_ attachments: [Attachment]) -> (Attachment?, [Attachment]) {
@@ -183,9 +198,10 @@ public struct Mail {
     }
     
     public var contentType: String {
-        if html != nil {
-            let boundary = "Swift-SMTP-\(UUID().uuidString)"
-            return "multipart/alternative; boundary=\"\(boundary)\""
+        if !attachments.isEmpty {
+            return "multipart/mixed; boundary=\"\(outerBoundary)\""
+        } else if html != nil || alternative != nil {
+            return "multipart/alternative; boundary=\"\(outerBoundary)\""
         } else {
             return "text/plain; charset=UTF-8"
         }

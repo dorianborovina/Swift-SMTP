@@ -33,14 +33,24 @@ struct DataSender {
         do {
             logger.log("Starting to send email data")
             try sendHeaders(mail.headersString)
+            // RFC 5322: a blank line separates headers from body. mail.headersString ends without a
+            // trailing CRLF, so we send one CRLF here to terminate the last header line and one
+            // more to produce the required blank line.
+            try send(CRLF)
+            try send(CRLF)
             logger.log("Email headers sent successfully")
 
-            if mail.hasAttachment {
-                logger.log("Email contains attachments, sending as multipart")
-                try sendMixed(mail)
+            if !mail.attachments.isEmpty {
+                logger.log("Email contains attachments, sending as multipart/mixed")
+                try sendMixedBody(mail)
+            } else if mail.html != nil || mail.alternative != nil {
+                logger.log("Email is multipart/alternative")
+                try sendAlternativeParts(mail, boundary: mail.outerBoundary)
+                try send("--\(mail.outerBoundary)--\(CRLF)")
             } else {
-                logger.log("Email is text-only, sending content")
-                try sendText(mail.text, html: mail.html)
+                logger.log("Email is plain text")
+                try send(mail.text)
+                try send(CRLF)
             }
             logger.log("Email content sent successfully")
         } catch {
@@ -54,81 +64,62 @@ struct DataSender {
         try send(headers)
     }
 
-    func sendText(_ text: String, html: String?) throws {
-        let boundary = "Swift-SMTP-\(UUID().uuidString)"
-        
-        if html != nil {
-            logger.log("Sending multipart alternative content (text + HTML)")
-            try send("Content-Type: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)")
+    private func sendMixedBody(_ mail: Mail) throws {
+        let outer = mail.outerBoundary
+
+        // First section: text alone, or text + html wrapped in an alternative container.
+        try send("--\(outer)\(CRLF)")
+
+        if mail.html != nil || mail.alternative != nil {
+            let inner = mail.innerBoundary
+            try send("Content-Type: multipart/alternative; boundary=\"\(inner)\"\(CRLF)")
             try send(CRLF)
+            try sendAlternativeParts(mail, boundary: inner)
+            try send("--\(inner)--\(CRLF)")
         } else {
-            logger.log("Sending plain text content")
+            try sendTextPart(mail.text)
         }
-        
-        // Plain text part
-        if html != nil {
+
+        // Remaining sections: each attachment.
+        for (index, attachment) in mail.attachments.enumerated() {
+            logger.log("Sending attachment \(index + 1) of \(mail.attachments.count)")
+            try send("--\(outer)\(CRLF)")
+            try sendAttachment(attachment)
+        }
+
+        try send("--\(outer)--\(CRLF)")
+    }
+
+    private func sendAlternativeParts(_ mail: Mail, boundary: String) throws {
+        // Plain text part.
+        try send("--\(boundary)\(CRLF)")
+        try sendTextPart(mail.text)
+
+        // HTML part — prefer mail.html when present, otherwise fall back to the
+        // alternative HTML attachment if one was provided.
+        if let html = mail.html {
             try send("--\(boundary)\(CRLF)")
+            try sendHTMLPart(html)
+        } else if let alternative = mail.alternative {
+            try send("--\(boundary)\(CRLF)")
+            try sendAttachment(alternative)
         }
+    }
+
+    private func sendTextPart(_ text: String) throws {
+        try send("Content-Type: text/plain; charset=UTF-8\(CRLF)")
+        try send("Content-Transfer-Encoding: 8bit\(CRLF)")
         try send(CRLF)
         try send(text)
         try send(CRLF)
-        
-        if let html = html {
-            logger.log("Sending HTML content")
-            try send("--\(boundary)\(CRLF)")
-            try send(CRLF)
-            try send(html)
-            try send(CRLF)
-            
-            try send("--\(boundary)--\(CRLF)")
-            logger.log("HTML content sent successfully")
-        }
     }
 
-    func sendMixed(_ mail: Mail) throws {
-        logger.log("Starting to send mixed content email")
-        let boundary = String.makeBoundary()
-        let mixedHeader = String.makeMixedHeader(boundary: boundary)
-
-        try send(mixedHeader)
-        try send(boundary.startLine)
-
-        try sendAlternative(for: mail)
-
-        try sendAttachments(mail.attachments, boundary: boundary)
-        logger.log("Mixed content email sent successfully")
-    }
-
-    func sendAlternative(for mail: Mail) throws {
-        if let alternative = mail.alternative {
-            logger.log("Sending alternative content")
-            let boundary = String.makeBoundary()
-            let alternativeHeader = String.makeAlternativeHeader(boundary: boundary)
-            try send(alternativeHeader)
-
-            try send(boundary.startLine)
-            try sendText(mail.text, html: mail.html)
-
-            try send(boundary.startLine)
-            try sendAttachment(alternative)
-
-            try send(boundary.endLine)
-            logger.log("Alternative content sent successfully")
-            return
-        }
-
-        try sendText(mail.text, html: mail.html)
-    }
-
-    func sendAttachments(_ attachments: [Attachment], boundary: String) throws {
-        logger.log("Starting to send \(attachments.count) attachments")
-        for (index, attachment) in attachments.enumerated() {
-            try send(boundary.startLine)
-            logger.log("Sending attachment \(index + 1) of \(attachments.count)")
-            try sendAttachment(attachment)
-        }
-        try send(boundary.endLine)
-        logger.log("All attachments sent successfully")
+    private func sendHTMLPart(_ html: String) throws {
+        try send("Content-Type: text/html; charset=UTF-8\(CRLF)")
+        try send("Content-Transfer-Encoding: 8bit\(CRLF)")
+        try send(CRLF)
+        try send(html)
+        try send(CRLF)
     }
 
     func sendAttachment(_ attachment: Attachment) throws {
@@ -137,33 +128,45 @@ struct DataSender {
         if attachment.hasRelated {
             logger.log("Sending attachment with related content")
             relatedBoundary = String.makeBoundary()
-            let relatedHeader = String.makeRelatedHeader(boundary: relatedBoundary)
-            try send(relatedHeader)
-            try send(relatedBoundary.startLine)
+            try send(String.makeRelatedHeader(boundary: relatedBoundary))
+            try send(CRLF)
+            try send("\(relatedBoundary.startLine)\(CRLF)")
         }
 
-        let attachmentHeader = attachment.headersString + CRLF
-        try send(attachmentHeader)
+        try send(attachment.headersString)
+        try send(CRLF)
+        try send(CRLF)
 
         switch attachment.type {
         case .data(let data, let mime, let name, _):
             logger.log("Sending data attachment: \(name) (\(mime)) - \(data.count) bytes")
             try sendData(data)
-            
+
         case .file(let path, let mime, let name, _):
             logger.log("Sending file attachment: \(name) (\(mime)) from path: \(path)")
             try sendFile(at: path)
-            
+
         case .html(let content, let charset, _):
             logger.log("Sending HTML attachment (charset: \(charset)) - \(content.count) characters")
             try sendHTML(content)
         }
 
-        try send("")
+        try send(CRLF)
 
         if attachment.hasRelated {
             try sendAttachments(attachment.relatedAttachments, boundary: relatedBoundary)
         }
+    }
+
+    func sendAttachments(_ attachments: [Attachment], boundary: String) throws {
+        logger.log("Starting to send \(attachments.count) related attachments")
+        for (index, attachment) in attachments.enumerated() {
+            try send("\(boundary.startLine)\(CRLF)")
+            logger.log("Sending related attachment \(index + 1) of \(attachments.count)")
+            try sendAttachment(attachment)
+        }
+        try send("\(boundary.endLine)\(CRLF)")
+        logger.log("All related attachments sent successfully")
     }
 
     func sendData(_ data: Data) throws {
@@ -264,35 +267,15 @@ private extension DataSender {
 }
 
 private extension String {
-    // Embed plain text content of emails with the proper headers so that it is entered correctly.
-    var embedded: String {
-        var embeddedText = ""
-        embeddedText += "CONTENT-TYPE: text/plain; charset=utf-8\(CRLF)"
-        embeddedText += "CONTENT-TRANSFER-ENCODING: 7bit\(CRLF)"
-        embeddedText += "CONTENT-DISPOSITION: inline\(CRLF)"
-        embeddedText += "\(CRLF)\(self)\(CRLF)"
-        return embeddedText
-    }
-
     // The SMTP protocol requires unique boundaries between sections of an email.
     static func makeBoundary() -> String {
         return UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
-    // Header for a mixed type email.
-    static func makeMixedHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/mixed; boundary=\"\(boundary)\"\(CRLF)"
-    }
-
-    // Header for an alternative email.
-    static func makeAlternativeHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/alternative; boundary=\"\(boundary)\"\(CRLF)"
-    }
-
     // Header for an attachment that is related to another attachment. (Such as an image attachment that can be
     // referenced by a related HTML attachment)
     static func makeRelatedHeader(boundary: String) -> String {
-        return "CONTENT-TYPE: multipart/related; boundary=\"\(boundary)\"\(CRLF)"
+        return "Content-Type: multipart/related; boundary=\"\(boundary)\"\(CRLF)"
     }
 
     // Added to a boundary to indicate the beginning of the corresponding section.
