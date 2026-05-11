@@ -255,9 +255,17 @@ struct DataSender {
 }
 
 private extension DataSender {
+    // Body writes must be byte-exact. SMTPSocket.write(_ text: String) appends a CRLF
+    // (correct for SMTP commands like EHLO/MAIL FROM, wrong for body fragments that
+    // already include their own line terminators). We encode to UTF-8 Data and go through
+    // the Data overload of socket.write, which does not append anything.
     func send(_ text: String) throws {
         logger.logSent(text)
-        try socket.write(text)
+        guard let data = text.data(using: .utf8) else {
+            try socket.write(text)
+            return
+        }
+        try socket.write(data)
     }
 
     func send(_ data: Data) throws {
